@@ -7,7 +7,7 @@ from __future__ import annotations
 from datetime import date
 from typing import List, Optional
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 
 class Ad(BaseModel):
@@ -28,6 +28,9 @@ class Ad(BaseModel):
     landing_page: Optional[str] = Field(
         None, description="Destination URL when the ad is clicked."
     )
+    ig_username: Optional[str] = Field(
+        None, description="Extracted Instagram username if landing_page is an IG profile."
+    )
     platforms: List[str] = Field(
         default_factory=list,
         description="Platforms where the ad ran (e.g. Facebook, Instagram, Messenger).",
@@ -35,6 +38,19 @@ class Ad(BaseModel):
     snapshot_url: Optional[str] = Field(
         None, description="Link to the ad's Ads Library snapshot page."
     )
+
+    @model_validator(mode="after")
+    def _populate_ig_data(self) -> "Ad":
+        # Importación local para evitar el ciclo circular con scraper/__init__.py
+        from scraper.utils import extract_ig_username, unwrap_meta_redirect
+
+        if self.landing_page:
+            self.landing_page = unwrap_meta_redirect(self.landing_page)
+            username = extract_ig_username(self.landing_page)
+            if username:
+                self.ig_username = username
+                self.landing_page = f"https://www.instagram.com/{username}/"
+        return self
 
     @field_validator("status", mode="before")
     @classmethod

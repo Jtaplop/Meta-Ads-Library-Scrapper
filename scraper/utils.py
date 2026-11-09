@@ -7,8 +7,24 @@ from __future__ import annotations
 import re
 from datetime import date, datetime
 from typing import Any, Dict, List, Optional
+from urllib.parse import parse_qs, unquote, urlencode, urlparse
 
 from loguru import logger
+
+from config import (
+    ADS_LIBRARY_BASE_URL,
+    DEFAULT_ACTIVE_STATUS,
+    DEFAULT_AD_TYPE,
+    DEFAULT_COUNTRY,
+    DEFAULT_MEDIA_TYPE,
+    DEFAULT_PLATFORM,
+    DEFAULT_SEARCH_TYPE_EXACT,
+    DEFAULT_SEARCH_TYPE_KEYWORD,
+    DEFAULT_SEARCH_TYPE_PAGE,
+    IG_PROFILE_REGEX,
+)
+
+_IG_COMPILED_RE = re.compile(IG_PROFILE_REGEX, re.IGNORECASE)
 
 
 def safe_get(obj: Any, *keys: str, default: Any = None) -> Any:
@@ -101,71 +117,6 @@ def strip_meta_json_prefix(raw: str, prefix: str = "for (;;);") -> str:
     return raw
 
 
-def build_search_url(
-    base_url: str,
-    *,
-    keyword: Optional[str] = None,
-    page_url: Optional[str] = None,
-    slug: Optional[str] = None,
-    country: str = "ALL",
-    ad_type: str = "all",
-    active_status: str = "all",
-) -> str:
-    """
-    Construct a Meta Ads Library search URL from the given parameters.
-
-    Exactly one of *keyword*, *page_url*, or *slug* should be provided.
-
-    Parameters
-    ----------
-    base_url:
-        The Ads Library base URL (taken from config).
-    keyword:
-        Free-text search term — triggers ``search_type=keyword_unordered``.
-    page_url:
-        Full URL of a Facebook Page whose ads to retrieve.
-    slug:
-        Facebook page slug/username (e.g. ``"nike"``).
-    country:
-        ISO-3166-1 alpha-2 country code, or ``"ALL"`` for global results.
-    ad_type:
-        ``"all"``, ``"political_and_issue_ads"``, etc.
-    active_status:
-        ``"all"``, ``"active"``, or ``"inactive"``.
-
-    Returns
-    -------
-    str
-        Fully qualified Ads Library search URL.
-
-    Raises
-    ------
-    ValueError
-        When none of *keyword*, *page_url*, or *slug* is provided.
-    """
-    params: Dict[str, str] = {
-        "active_status": active_status,
-        "ad_type": ad_type,
-        "country": country,
-    }
-
-    if keyword:
-        params["q"] = keyword
-        params["search_type"] = "keyword_unordered"
-    elif slug:
-        params["q"] = slug
-        params["search_type"] = "page"
-    elif page_url:
-        # Extract the page identifier (slug or ID) from the URL path
-        match = re.search(r"facebook\.com/([^/?#]+)", page_url)
-        identifier = match.group(1) if match else page_url
-        params["q"] = identifier
-        params["search_type"] = "page"
-    else:
-        raise ValueError("One of keyword, page_url, or slug must be provided.")
-
-    query_string = "&".join(f"{k}={v}" for k, v in params.items())
-    return f"{base_url}?{query_string}"
 
 
 def deduplicate_ads(ads: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
@@ -196,3 +147,98 @@ def deduplicate_ads(ads: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         elif not ad_id:
             result.append(ad)
     return result
+
+def unwrap_meta_redirect(url: Optional[str]) -> Optional[str]:
+    """
+    Si la URL viene envuelta en el redireccionador de Meta (l.facebook.com/l.php?u=...
+    o l.instagram.com/?u=...), extrae y decodifica la URL real de destino.
+    """
+    if not url:
+        return None
+    parsed = urlparse(url.strip())
+    if parsed.netloc in ("l.facebook.com", "lm.facebook.com", "l.instagram.com"):
+        qs = parse_qs(parsed.query)
+        if "u" in qs and qs["u"]:
+            return unquote(qs["u"][0])
+    return url.strip()
+
+
+def extract_ig_username(url: Optional[str]) -> Optional[str]:
+    """
+    Devuelve el username limpio de Instagram si la URL corresponde a un perfil
+    válido de Instagram. Si es una web externa, un post (/p/) o un reel, devuelve None.
+    """
+    clean_url = unwrap_meta_redirect(url)
+    if not clean_url:
+        return None
+
+    # A veces Meta usa instagram.com/_u/<username> en enlaces de botón "Ir al perfil"
+    clean_url = re.sub(
+        r"^(https?://(?:www\.)?instagram\.com)/_u/",
+        r"\1/",
+        clean_url,
+        flags=re.IGNORECASE,
+    )
+
+    match = _IG_COMPILED_RE.match(clean_url)
+    if match:
+        return match.group(1).lower()
+    return None
+
+
+def is_instagram_profile_url(url: Optional[str]) -> bool:
+    """True si la landing_page apunta directamente a un perfil de Instagram."""
+    return extract_ig_username(url) is not None
+
+
+def build_search_url(
+    keyword: Optional[str] = None,
+    page_url: Optional[str] = None,
+    slug: Optional[str] = None,
+    country: str = DEFAULT_COUNTRY,
+    active_status: str = DEFAULT_ACTIVE_STATUS,
+    platform: Optional[str] = DEFAULT_PLATFORM,
+    media_type: str = DEFAULT_MEDIA_TYPE,
+    min_date: Optional[str] = None,
+    max_date: Optional[str] = None,
+    exact_phrase: bool = False,
+) -> str:
+    """
+    Construye la URL completa de la Meta Ads Library con todos los filtros nativos.
+    """
+    query_target = keyword or slug or (
+        (page_url or "").rstrip("/").rsplit("/", 1)[-1]
+    )
+
+    # Si el usuario pasa --exact, forzamos comillas y search_type=keyword_exact_phrase
+    if keyword and exact_phrase:
+        search_type = DEFAULT_SEARCH_TYPE_EXACT
+        if not (query_target.startswith('"') and query_target.endswith('"')):
+            query_target = f'"{query_target}"'
+    elif keyword:
+        search_type = DEFAULT_SEARCH_TYPE_KEYWORD
+    else:
+        search_type = DEFAULT_SEARCH_TYPE_PAGE
+
+    params: dict[str, str] = {
+        "active_status": active_status.lower(),
+        "ad_type": DEFAULT_AD_TYPE,
+        "country": country.upper(),
+        "q": query_target,
+        "search_type": search_type,
+    }
+
+    if media_type and media_type.lower() != "all":
+        params["media_type"] = media_type.lower()
+
+    if platform:
+        # Formato exacto que espera Meta en la URL para filtrar por plataforma
+        params["publisher_platforms[0]"] = platform.lower()
+
+    if min_date:
+        params["start_date[min]"] = min_date  # Formato YYYY-MM-DD
+
+    if max_date:
+        params["start_date[max]"] = max_date  # Formato YYYY-MM-DD
+
+    return f"{ADS_LIBRARY_BASE_URL}?{urlencode(params)}"

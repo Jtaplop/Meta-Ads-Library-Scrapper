@@ -172,10 +172,16 @@ def extract_ig_username(url: Optional[str]) -> Optional[str]:
     if not clean_url:
         return None
 
-    # A veces Meta usa instagram.com/_u/<username> en enlaces de botón "Ir al perfil"
+    # Normalizar enlaces de instagram.com/_u/<username> o ig.me/(m|u)/<username>
     clean_url = re.sub(
-        r"^(https?://(?:www\.)?instagram\.com)/_u/",
-        r"\1/",
+        r"^https?://(?:www\.)?instagram\.com/_u/",
+        "https://www.instagram.com/",
+        clean_url,
+        flags=re.IGNORECASE,
+    )
+    clean_url = re.sub(
+        r"^https?://(?:www\.)?ig\.me/(?:m/|u/)?",
+        "https://www.instagram.com/",
         clean_url,
         flags=re.IGNORECASE,
     )

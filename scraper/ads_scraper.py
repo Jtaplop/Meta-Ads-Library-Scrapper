@@ -244,6 +244,42 @@ class AdsScraper:
         before_sleep=_log_retry,
         reraise=True,
     )
+    
+
+    async def _dismiss_cookie_banner(self) -> None:
+        """Cierra el modal de cookies de Meta (GDPR en España/UE) si aparece."""
+        if not self._page:
+            return
+        cookie_selectors = [
+            "button[data-cookiebanner='accept_button']",
+            "button[data-cookiebanner='accept_only_essential_button']",
+            "div[role='dialog'] div[role='button']:has-text('Allow all cookies')",
+            "div[role='dialog'] div[role='button']:has-text('Permitir todas las cookies')",
+            "div[role='dialog'] div[role='button']:has-text('Rechazar cookies opcionales')",
+            "div[role='dialog'] div[role='button']:has-text('Decline optional cookies')",
+        ]
+        for selector in cookie_selectors:
+            try:
+                btn = await self._page.query_selector(selector)
+                if btn and await btn.is_visible():
+                    await btn.click()
+                    logger.info("Cookie banner dismissed via selector: {}", selector)
+                    await self._page.wait_for_timeout(1000)
+                    break
+            except Exception:  # noqa: BLE001
+                continue
+
+    @retry(
+        retry=retry_if_exception_type(Exception),
+        stop=stop_after_attempt(RETRY_MAX_ATTEMPTS),
+        wait=wait_exponential(
+            multiplier=1,
+            min=RETRY_WAIT_SECONDS_MIN,
+            max=RETRY_WAIT_SECONDS_MAX,
+        ),
+        before_sleep=_log_retry,
+        reraise=True,
+    )
     async def _navigate(self, url: str) -> None:
         """Navigate to *url* with Tenacity retry on any exception."""
         assert self._page is not None, "_navigate called before browser was launched"
@@ -254,6 +290,7 @@ class AdsScraper:
                 wait_until="domcontentloaded",
             )
             await self._page.wait_for_timeout(PAGE_LOAD_WAIT_MS)
+            await self._dismiss_cookie_banner()
             logger.info("Navigation successful: {}", self._page.url)
         except Exception as exc:
             err_str = str(exc)
@@ -271,37 +308,37 @@ class AdsScraper:
                     except Exception:  # noqa: BLE001
                         pass
                     await self._page.wait_for_timeout(PAGE_LOAD_WAIT_MS)
+                    await self._dismiss_cookie_banner()
                     return
             logger.warning("Navigation attempt failed: {}", exc)
             raise
 
     async def _collect_current_ads(self) -> List[Dict[str, Any]]:
         """
-        Parse intercepted XHR responses (or fallback to DOM) and filter in-flight
-        so only matching ads count toward pagination progress.
+        Parsea tanto los anuncios del SSR inicial (DOM) como los nuevos cuerpos XHR,
+        aplicando el filtro de perfil de IG si está activo.
         """
-        xhr_ads: List[Dict[str, Any]] = []
-        for body in self._intercepted_bodies:
+        ads: List[Dict[str, Any]] = []
+
+        # 1. Extraer anuncios de las respuestas XHR interceptadas
+        while self._intercepted_bodies:
+            body = self._intercepted_bodies.pop(0)
             batch = parse_xhr_response(body)
-            xhr_ads.extend(batch)
+            ads.extend(batch)
 
-        if xhr_ads:
-            logger.debug(
-                "XHR path: {} total ads across {} intercepted responses",
-                len(xhr_ads),
-                len(self._intercepted_bodies),
-            )
-            ads = xhr_ads
-        else:
-            logger.info("No XHR data captured yet — falling back to DOM parsing")
-            ads = await parse_dom_ads(self._page)  # type: ignore[arg-type]
+        # 2. En la primera pasada (o si aún no hay XHR), extraer también los anuncios SSR del HTML
+        dom_ads = await parse_dom_ads(self._page)  # type: ignore[arg-type]
+        ads.extend(dom_ads)
 
-        # Filtro en caliente: solo dejamos pasar anuncios cuya landing_page sea un perfil de IG
+        logger.debug("Raw ads extracted in this pass (before IG filter): {}", len(ads))
+
+        # 3. Filtro en caliente por perfil de Instagram
         if self.only_ig_profile:
             ads = [
                 ad for ad in ads
                 if is_instagram_profile_url(ad.get("landing_page"))
             ]
+            logger.debug("Ads matching Instagram profile URL in this pass: {}", len(ads))
 
         return ads
 

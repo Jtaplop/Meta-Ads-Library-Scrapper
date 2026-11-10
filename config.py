@@ -56,7 +56,7 @@ SCROLL_PAUSE_SECONDS: float = 2.5
 NO_NEW_ADS_THRESHOLD: int = 3
 # Cuando filtramos por perfil de IG en memoria, varios scrolls seguidos pueden
 # traer solo webs externas; subimos la tolerancia antes de parar.
-NO_NEW_ADS_THRESHOLD_FILTERED: int = 10
+NO_NEW_ADS_THRESHOLD_FILTERED: int = 20
 
 # ---------------------------------------------------------------------------
 # Browser / network

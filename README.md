@@ -1,234 +1,103 @@
-# meta-ads-scraper
+# Meta Ads Library Scraper & Lead Gen UI
 
-A production-quality, async Python scraper for the [Meta Ads Library](https://www.facebook.com/ads/library/) that supports keyword search, page URL targeting, and slug-based lookups with structured output, pagination, retries, and CSV/JSON export.
+A fast, no-nonsense web interface for scraping the Meta Ads Library. Built specifically for client acquisition, competitor monitoring, and extracting verified Instagram profiles from active ads.
 
----
-
-## Table of Contents
-
-1. [Overview](#overview)
-2. [Features](#features)
-3. [Architecture](#architecture)
-4. [Installation](#installation)
-5. [Usage](#usage)
-6. [Configuration](#configuration)
-7. [Output Schema](#output-schema)
-8. [Limitations](#limitations)
-9. [Future Improvements](#future-improvements)
+<!-- YOUTUBE DEMO VIDEO -->
+<!-- Simply replace the video URL below with your YouTube link: -->
+<p align="center">
+  <a href="https://www.youtube.com/watch?v=mwIELD710-o">
+    <img src="https://img.youtube.com/vi/mwIELD710-o/maxresdefault.jpg" alt="Watch Demo Video" width="85%" style="border-radius: 8px; box-shadow: 0 4px 12px rgba(0,0,0,0.15);" />
+  </a>https://youtu.be/
+</p>
 
 ---
 
-## Overview
-
-The Meta Ads Library is a public transparency tool that lets anyone search for ads running across Facebook, Instagram, Messenger, and Audience Network. This scraper automates that process programmatically using [Playwright](https://playwright.dev/python/) for browser automation, intercepting XHR/GraphQL network traffic for maximum data richness and falling back to DOM parsing when structured responses are unavailable.
-
----
-
-## Features
-
-- **Three search modes** — keyword, Facebook page URL, or page slug/username
-- **XHR/GraphQL interception** — captures structured JSON payloads from Meta's internal API before they are rendered into the DOM, providing richer data than HTML scraping alone
-- **DOM fallback** — gracefully degrades to CSS-selector-based HTML extraction when XHR yields no results
-- **Infinite-scroll pagination** — scrolls the page automatically, stopping when the limit is reached or stagnation is detected
-- **Tenacity retries** — network-sensitive operations retry up to 4 times with exponential back-off; each attempt is logged
-- **Deduplication** — ads are deduplicated by `ad_id` across all scroll passes
-- **Pydantic v2 validation** — every scraped record is validated against a typed model before export
-- **CSV and JSON export** — CSV via pandas (UTF-8 with BOM for Excel compatibility), JSON via stdlib `json`
-- **Loguru logging** — structured, colourised console output with configurable verbosity
-- **Typer CLI** — ergonomic command-line interface with `--help` on every option
+## Quick Navigation
+1. [Prerequisites](#prerequisites)
+2. [Quick Start](#quick-start)
+3. [Key Features](#key-features)
+4. [Pro Tips for Lead Generation](#pro-tips-for-lead-generation)
+5. [Troubleshooting](#troubleshooting)
 
 ---
 
-## Architecture
+## Prerequisites
 
-```
-meta-ads-scraper/
-├── main.py                  # CLI entry point (Typer)
-├── config.py                # All constants and tuneable parameters
-├── requirements.txt
-├── .gitignore
-│
-├── models/
-│   └── ad.py                # Pydantic v2 Ad model (13 fields)
-│
-├── scraper/
-│   ├── ads_scraper.py       # AdsScraper class — orchestrates the pipeline
-│   ├── parser.py            # XHR JSON parser + DOM fallback parser
-│   ├── pagination.py        # Infinite-scroll controller
-│   └── utils.py             # URL builder, timestamp parser, dedup helper
-│
-├── exporters/
-│   ├── csv_exporter.py      # CsvExporter (pandas)
-│   └── json_exporter.py     # JsonExporter (stdlib json)
-│
-└── output/                  # Exported files land here (git-ignored)
-```
+Before running the application, make sure you have installed:
+* **Python 3.11+**
+* **Node.js 20+**
 
-### Data Flow
+If you haven't installed the project dependencies yet, open a PowerShell terminal in the project root:
 
-```
-CLI (main.py)
-    │
-    ▼
-AdsScraper.run()
-    │
-    ├─► _launch_browser()          # Playwright Chromium, headless
-    │       └─ page.on("response") # Register XHR interceptor
-    │
-    ├─► _navigate(url)             # Tenacity-retried goto()
-    │
-    └─► scroll_and_collect()       # Pagination loop
-            │
-            ├─► _collect_current_ads()
-            │       ├─ parse_xhr_response()   # XHR path (preferred)
-            │       └─ parse_dom_ads()        # DOM fallback
-            │
-            └─► _scroll_to_bottom()          # JS scroll + network idle wait
-                    │
-                    ▼
-            deduplicate_ads() → _validate_ads() → List[Ad]
-                    │
-                    ▼
-            CsvExporter / JsonExporter → output/<filename>
-```
-
----
-
-## Installation
-
-### Prerequisites
-
-- Python 3.11 or later
-- `pip`
-
-### Steps
-
-```bash
-# 1. Clone the repository
-git clone https://github.com/your-username/meta-ads-scraper.git
-cd meta-ads-scraper
-
-# 2. Create and activate a virtual environment
-python -m venv .venv
-# Windows
-.venv\Scripts\activate
-# macOS / Linux
-source .venv/bin/activate
-
-# 3. Install Python dependencies
-pip install -r requirements.txt
-
-# 4. Install Playwright browser binaries (Chromium only)
+```powershell
+# 1. Backend environment
+cd backend
+python -m venv venv
+.\venv\Scripts\Activate.ps1
+pip install -r requirements.txt -r requirements-api.txt
 playwright install chromium
+cd ..
+
+# 2. Frontend dependencies
+cd frontend
+npm install
+cd ..
 ```
 
 ---
 
-## Usage
+## Quick Start
 
-```
-python main.py [OPTIONS]
-```
+You don't need to run separate commands or open multiple terminals. Two automated scripts are ready in the `scripts/` folder:
 
-### Options
-
-| Option       | Short | Type | Default | Description                      |
-| ------------ | ----- | ---- | ------- | -------------------------------- |
-| `--keyword`  | `-k`  | TEXT | —       | Free-text search keyword         |
-| `--page-url` | `-p`  | TEXT | —       | Full Facebook page URL           |
-| `--slug`     | `-s`  | TEXT | —       | Facebook page slug / username    |
-| `--format`   | `-f`  | TEXT | `json`  | Output format: `csv` or `json`   |
-| `--limit`    | `-l`  | INT  | `50`    | Maximum number of ads to collect |
-| `--country`  | `-c`  | TEXT | `ALL`   | ISO-3166-1 country code or `ALL` |
-| `--verbose`  | `-v`  | FLAG | `False` | Enable DEBUG-level logging       |
-
-Exactly **one** of `--keyword`, `--page-url`, or `--slug` must be provided.
-
-### Examples
-
-```bash
-# Search by keyword, export 100 ads as CSV
-python main.py --keyword nike --format csv --limit 100
-
-# Search a specific page by slug, export as JSON
-python main.py --slug cocacola --format json --limit 50
-
-# Search by full page URL, restrict to US ads
-python main.py --page-url https://www.facebook.com/nike --country US --format csv
-
-# Enable verbose debug logging
-python main.py --keyword "electric cars" --format json --verbose
+### Regular Use (One-click launch)
+Compiles the interface and opens your default browser at `http://127.0.0.1:8000`:
+```powershell
+.\scripts\start.ps1
 ```
 
-Output files are written to the `output/` directory and named:
+### Development Mode (Hot-Reload)
+Runs Vite HMR on port `5173` and FastAPI on port `8000`:
+```powershell
+.\scripts\dev.ps1
+```
 
-```
-<label>_<YYYYMMDD_HHMMSS>.<format>
-# e.g. nike_20260521_143022.csv
-```
+> **Windows PowerShell Note:** If script execution is restricted on your machine, run `Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass` once in your terminal session before launching the scripts.
 
 ---
 
-## Configuration
+## Key Features
 
-All tuneable constants live in `config.py`. Key parameters:
-
-| Constant                 | Default    | Description                               |
-| ------------------------ | ---------- | ----------------------------------------- |
-| `HEADLESS`               | `True`     | Run browser in headless mode              |
-| `ADS_PER_PAGE`           | `30`       | Default scrape limit                      |
-| `MAX_SCROLL_ATTEMPTS`    | `50`       | Hard cap on scroll iterations             |
-| `SCROLL_PAUSE_SECONDS`   | `2.5`      | Pause after each scroll (seconds)         |
-| `NO_NEW_ADS_THRESHOLD`   | `3`        | Consecutive empty scrolls before stopping |
-| `RETRY_MAX_ATTEMPTS`     | `4`        | Tenacity retry count                      |
-| `RETRY_WAIT_SECONDS_MIN` | `1`        | Minimum back-off wait (seconds)           |
-| `RETRY_WAIT_SECONDS_MAX` | `10`       | Maximum back-off wait (seconds)           |
-| `NAVIGATION_TIMEOUT_MS`  | `60000`    | Page navigation timeout (ms)              |
-| `OUTPUT_DIR`             | `"output"` | Directory for exported files              |
-
----
-
-## Output Schema
-
-Each exported ad record contains the following fields:
-
-| Field          | Type           | Description                            |
-| -------------- | -------------- | -------------------------------------- |
-| `ad_id`        | `str`          | Unique Ads Library archive ID          |
-| `page_id`      | `str \| null`  | Facebook Page ID                       |
-| `page_name`    | `str \| null`  | Advertiser page display name           |
-| `ad_text`      | `str \| null`  | Primary body copy                      |
-| `ad_caption`   | `str \| null`  | Headline or short caption              |
-| `start_date`   | `date \| null` | Date ad started running                |
-| `end_date`     | `date \| null` | Date ad stopped (null if active)       |
-| `status`       | `str \| null`  | `ACTIVE`, `INACTIVE`, or `UNKNOWN`     |
-| `image_url`    | `str \| null`  | Primary image URL                      |
-| `video_url`    | `str \| null`  | Primary video URL                      |
-| `landing_page` | `str \| null`  | Click-through destination URL          |
-| `platforms`    | `list[str]`    | Platforms the ad ran on                |
-| `snapshot_url` | `str \| null`  | Direct link to the Ads Library listing |
+* **Visual Scraper (`/scrape/new`)**: Search by keyword, Facebook Page URL, or brand username. Filter by country, media type (videos/images), platforms, and minimum start date.
+* **Lead Gen Mode (`--only-ig-profile`)**: Automatically discards generic websites and WhatsApp links, retaining only advertisers sending paid traffic directly to their Instagram profile.
+* **Smart Presets**: One-click setups for common workflows:
+  * *Instagram Lead Gen* (coaches, clinics, personal brands)
+  * *Winning Ads* (campaigns running > 30 days)
+  * *Pain-Point Sweeps* (symptom-based batch searches)
+  * *External Funnels* (WhatsApp, Calendly, landing pages)
+* **Live Cockpit (`/jobs/:id`)**: Real-time progress bar, scroll counters, unique IG handles discovered, and live terminal logs via Server-Sent Events. Cancel runs cleanly without orphan Chrome processes.
+* **Batch Runner (`/scrape/batch`)**: Queue up multiple keywords sequentially with a safe cooldown timer between requests to prevent Meta rate limits.
+* **Results Explorer (`/results/:filename`)**:
+  * 1-Click advertiser deduplication ("1 row per advertiser").
+  * Copy all `@usernames` directly to clipboard for your outreach CRM.
+  * Export filtered views to Excel-compatible CSV (UTF-8 BOM) or clean JSON.
+  * Preview creatives directly inside the app, with fallback links to the live Meta Library if CDN links expire.
 
 ---
 
-## Limitations
+## Pro Tips for Lead Generation
 
-- **Rate limiting / bot detection** — Meta actively detects automated access. Prolonged scraping sessions may trigger CAPTCHAs or temporary IP blocks. This scraper does not implement CAPTCHA solving.
-- **Login wall** — Some ad details (e.g. targeting parameters, spend estimates) are only visible when logged in. This scraper operates without authentication.
-- **API instability** — Meta's internal GraphQL schema and DOM structure change without notice. XHR interception paths and DOM selectors may require updates after Meta deploys frontend changes.
-- **Geographic restrictions** — Certain ad categories (political/issue ads) are only searchable within specific countries.
-- **No proxy support** — The current implementation does not rotate IPs or support proxy configuration. This is a planned enhancement (see below).
-- **Windows asyncio** — On Windows, `asyncio.run()` uses the `ProactorEventLoop` which is compatible with Playwright; no additional configuration is needed.
+1. **Batch size:** Keep each search limit between **50 and 150 ads**. Scraping hundreds of ads at once increases the risk of temporary IP rate-limits from Meta.
+2. **Finding winning offers:** Sort the results table by `Days Active` or use the "Winning Ads" toggle. If a business has had an ad active for 60+ days, it is consistently profitable for them.
+3. **Pain words instead of titles:** Instead of searching for `"psychologist"`, search for the problem they solve (e.g., `"anxiety"`, `"burnout"`, `"insomnia"`).
 
 ---
 
-## Future Improvements
+## Troubleshooting
 
-- **Proxy rotation** — Integrate a proxy pool to distribute requests and reduce block risk.
-- **Cookie / session injection** — Support authenticated scraping to access spend estimates and detailed targeting data.
-- **Incremental / resumable runs** — Persist the last seen `ad_id` to a state file so runs can resume after interruption.
-- **Async export** — Run export concurrently with scraping using `asyncio.Queue`.
-- **Additional output formats** — SQLite, PostgreSQL, or Google Sheets export.
-- **Automatic selector healing** — Detect selector failures and attempt to re-derive working selectors from the live DOM structure.
-- **CAPTCHA detection** — Surface a human-solvable CAPTCHA prompt when bot-detection is triggered, then resume automatically.
-- **Docker image** — Package the scraper with Playwright browsers in a reproducible container.
-- **Test suite** — Unit tests for parser functions and integration tests using Playwright's network-mocking capabilities.
+* **Script won't start in PowerShell?**
+  Run: `Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass`
+* **Zero results returned?**
+  Make sure your keyword isn't too narrow. Try switching Country to `ALL` or disabling the Exact Phrase checkbox.
+* **Browser crashes on startup?**
+  Re-run `playwright install chromium` inside your active virtual environment.

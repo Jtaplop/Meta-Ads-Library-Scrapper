@@ -7,6 +7,8 @@ __pycache__/
 # Virtual environments
 .venv/
 venv/
+backend/.venv/
+backend/venv/
 env/
 ENV/
 
@@ -14,9 +16,17 @@ ENV/
 .env
 .env.*
 
-# Output files
-output/*.csv
-output/*.json
+# Output & API runtime data
+backend/output/*.csv
+backend/output/*.json
+backend/api/data/
+
+# Node / Frontend
+node_modules/
+frontend/node_modules/
+frontend/dist/
+frontend/.vite/
+*.tsbuildinfo
 
 # IDE / editor
 .idea/
@@ -24,32 +34,14 @@ output/*.json
 *.swp
 *.swo
 
-# macOS
+# OS
 .DS_Store
-.AppleDouble
-.LSOverride
-
-# Windows
 Thumbs.db
 ehthumbs.db
 Desktop.ini
 
-# Distribution / packaging
-*.egg-info/
-dist/
-build/
-*.egg
-MANIFEST
-
-# Testing & coverage
+# Testing & logs
 .pytest_cache/
 .coverage
 htmlcov/
-.tox/
-
-# Type-checking
-.mypy_cache/
-.dmypy.json
-
-# Logs
 *.log

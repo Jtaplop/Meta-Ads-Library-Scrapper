@@ -57,6 +57,7 @@ from scraper.parser import parse_dom_ads, parse_xhr_response
 from scraper.utils import (
     build_search_url,
     deduplicate_ads,
+    extract_ig_username,
     is_instagram_profile_url,
 )
 
@@ -118,6 +119,7 @@ class AdsScraper:
         self._browser: Optional[Browser] = None
         self._context: Optional[BrowserContext] = None
         self._page: Optional[Page] = None
+        self._seen_ig_usernames: set[str] = set()
 
     # ------------------------------------------------------------------
     # Public entry point
@@ -125,6 +127,7 @@ class AdsScraper:
     async def run(self) -> List[Ad]:
         """Execute the full scrape pipeline and return validated Ad objects."""
         self._intercepted_bodies = []
+        self._seen_ig_usernames = set()
         async with async_playwright() as playwright:
             await self._launch_browser(playwright)
             try:
@@ -334,11 +337,21 @@ class AdsScraper:
 
         # 3. Filtro en caliente por perfil de Instagram
         if self.only_ig_profile:
-            ads = [
-                ad for ad in ads
-                if is_instagram_profile_url(ad.get("landing_page"))
-            ]
-            logger.debug("Ads matching Instagram profile URL in this pass: {}", len(ads))
+            unique_ig_ads: List[Dict[str, Any]] = []
+            for ad in ads:
+                username = extract_ig_username(ad.get("landing_page"))
+                if username and username not in self._seen_ig_usernames:
+                    self._seen_ig_usernames.add(username)
+                    # Normalizamos ya la landing_page para que quede idéntica en todo el flujo
+                    ad["landing_page"] = f"https://www.instagram.com/{username}/"
+                    unique_ig_ads.append(ad)
+
+            ads = unique_ig_ads
+            logger.debug(
+                "New unique IG profiles in this pass: {} (total unique profiles so far: {})",
+                len(ads),
+                len(self._seen_ig_usernames),
+            )
 
         return ads
 
